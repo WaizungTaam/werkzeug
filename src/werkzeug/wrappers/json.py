@@ -13,6 +13,7 @@ except ImportError:
     import json as _json
 
 
+# [z]: This class wraps the _json module to provide custom features for wider usages.
 class _JSONModule(object):
     @staticmethod
     def _default(o):
@@ -33,11 +34,16 @@ class _JSONModule(object):
         kw.setdefault("default", cls._default)
         kw.setdefault("sort_keys", True)
         return _json.dumps(obj, **kw)
+        # [z]: Compact seperators, sort keys, conversion for date, uuid and html.
 
     @staticmethod
     def loads(s, **kw):
         if isinstance(s, bytes):
             # Needed for Python < 3.6
+            # [z]: In Python 3.5 and lower, json.loads only accepts str instance.
+            #      https://docs.python.org/3.5/library/json.html#json.loads
+            #      From 3.6, json.loads accepts str, bytes or bytearray.
+            #      https://docs.python.org/3.6/library/json.html#json.loads
             encoding = detect_utf_encoding(s)
             s = s.decode(encoding)
 
@@ -83,6 +89,8 @@ class JSONMixin(object):
     def _get_data_for_json(self, cache):
         try:
             return self.get_data(cache=cache)
+            # [z]: get_data() comes from the main class,
+            #      and try to see if it accepts a `cache` parameter.
         except TypeError:
             # Response doesn't have cache param.
             return self.get_data()
@@ -90,6 +98,11 @@ class JSONMixin(object):
     # Cached values for ``(silent=False, silent=True)``. Initialized
     # with sentinel values.
     _cached_json = (Ellipsis, Ellipsis)
+    # [z]: For the parameter `silent` in get_json, if it is False,
+    #      _cached_json[0] will be used, and if it is true, _cached_json[1]
+    #      will be used.
+    #      (not silent cache, silent cache)
+    # [z?]: Quite interesting use of `Ellipsis` to indicate unset.
 
     def get_json(self, force=False, silent=False, cache=True):
         """Parse :attr:`data` as JSON.
@@ -108,33 +121,51 @@ class JSONMixin(object):
             calls.
         """
         if cache and self._cached_json[silent] is not Ellipsis:
+            # [z]: Use Ellipsis to check for init state.
             return self._cached_json[silent]
+        # [z]: If use cache and the corresponding cache for the current silent flag
+        #      has been set, return the cached value directly.
 
         if not (force or self.is_json):
             return None
+        # [z]: If not force, or this is not a json, return None.
 
         data = self._get_data_for_json(cache=cache)
+        # [z]: Since there are multiple levels of cache, calling get_json()
+        #      multiple times will not cause a performance concern.
 
         try:
             rv = self.json_module.loads(data)
         except ValueError as e:
+            # [z]: loads() failed.
             if silent:
+                # [z]: failed and silent
                 rv = None
+                # [z]: If failed and silent, set result to None.
 
                 if cache:
                     normal_rv, _ = self._cached_json
                     self._cached_json = (normal_rv, rv)
+                    # [z]: If failed and silent and cache, preserve the not silent cache,
+                    #      and update the silent cache to None.
+                    # [z?]: Why use a tuple which is immutable to represent the cache?
+                    #       Updating it takes more work than a mutable container like list.
             else:
+                # [z]: failed and not silent
                 rv = self.on_json_loading_failed(e)
 
                 if cache:
+                    # [z]: failed, not silent, on_json_loading_failed() returns a value, and cache.
                     _, silent_rv = self._cached_json
                     self._cached_json = (rv, silent_rv)
+                    # [z]: Update the not silent cache to rv.
         else:
+            # [z]: loads() succeed.
             if cache:
                 self._cached_json = (rv, rv)
+                # [z]: If do cache, set both not silent and silent cache to the result.
 
-        return rv
+        return rv  # [z?]: Early returning can save a lot indents.
 
     def on_json_loading_failed(self, e):
         """Called if :meth:`get_json` parsing fails and isn't silenced.
