@@ -25,6 +25,8 @@ except ImportError:
         from thread import get_ident
     except ImportError:
         from _thread import get_ident
+# [z]: The `local context` is identified by greenlet.getcurrent, or thread.get_ident.
+# [z?]: Find out more about greenlet.
 
 
 def release_local(local):
@@ -52,14 +54,19 @@ def release_local(local):
 
 class Local(object):
     __slots__ = ("__storage__", "__ident_func__")
+    # [z]: __slots__ gives faster attribute access and space savings in memory.
+    #      More on https://stackoverflow.com/questions/472000/usage-of-slots
 
     def __init__(self):
         object.__setattr__(self, "__storage__", {})
         object.__setattr__(self, "__ident_func__", get_ident)
+        # [z]: object.__setattr__ is a <slot wrapper '__setattr__' of 'object' objects>
+        # [z]: __storage__ is a dict, __ident_func__ is the function get_ident
 
     def __iter__(self):
         return iter(self.__storage__.items())
 
+    # [z?]: What's this for?
     def __call__(self, proxy):
         """Create a proxy for a name."""
         return LocalProxy(self, proxy)
@@ -70,8 +77,16 @@ class Local(object):
     def __getattr__(self, name):
         try:
             return self.__storage__[self.__ident_func__()][name]
+            # [z]: Get the current context identity first, then get the value for name.
+            #      __storage__ stores data like:
+            #      {
+            #        id1: {key1: value1, ...},
+            #        id2: {key2: value2, ...},
+            #        ...
+            #      }
         except KeyError:
             raise AttributeError(name)
+            # [z]: Raise AttributeError for a KeyError to simulate attribute access.
 
     def __setattr__(self, name, value):
         ident = self.__ident_func__()
@@ -80,6 +95,8 @@ class Local(object):
             storage[ident][name] = value
         except KeyError:
             storage[ident] = {name: value}
+        # [z]: If a KeyError occurs, then it must be ident not in storage.
+        # [z?]: Why not check `ident in storage`, and use try...except?
 
     def __delattr__(self, name):
         try:
@@ -116,7 +133,7 @@ class LocalStack(object):
     """
 
     def __init__(self):
-        self._local = Local()
+        self._local = Local()  # [z]: Wraps a Local instance
 
     def __release_local__(self):
         self._local.__release_local__()
@@ -140,9 +157,10 @@ class LocalStack(object):
 
     def push(self, obj):
         """Pushes a new item to the stack"""
-        rv = getattr(self._local, "stack", None)
+        rv = getattr(self._local, "stack", None) 
+        # [z]: self._local.__storage__[get_ident()]['stack']
         if rv is None:
-            self._local.stack = rv = []
+            self._local.stack = rv = []  # [z]: Use a list to simulate a stack
         rv.append(obj)
         return rv
 
@@ -156,6 +174,7 @@ class LocalStack(object):
         elif len(stack) == 1:
             release_local(self._local)
             return stack[-1]
+            # [z]: If this is the last element in the stack, release local.
         else:
             return stack.pop()
 
@@ -194,6 +213,7 @@ class LocalManager(object):
             self.locals = [locals]
         else:
             self.locals = list(locals)
+        # [z]: Maintains a list of Local instances
         if ident_func is not None:
             self.ident_func = ident_func
             for local in self.locals:
@@ -291,6 +311,8 @@ class LocalProxy(object):
 
     def __init__(self, local, name=None):
         object.__setattr__(self, "_LocalProxy__local", local)
+        # [z]: _LocalProxy__local, name mangling for class-private members. LocalProxy.__local
+        #      More on https://docs.python.org/3/tutorial/classes.html#private-variables
         object.__setattr__(self, "__name__", name)
         if callable(local) and not hasattr(local, "__release_local__"):
             # "local" is a callable that is not an instance of Local or
